@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: light dark;
+  color: rgba(255, 255, 255, 0.87);
+  background-color: #0f172a;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+#root {
+  width: 100%;
+}
+
+.react-flow__node {
+  border-radius: 8px;
+  /* CRITICAL: Removed transition to eliminate drag lag */
+  will-change: transform;
+}
+
+.react-flow__node.selected {
+  outline: none;
+}
+
+.react-flow__node.selected > div {
+  box-shadow: 0 0 20px rgba(56, 189, 248, 0.4);
+}
+
+.glass {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* TEST MODE VISUALS */
+.test-mode-active .react-flow__node:not(.manual-trigger-node) {
+  filter: grayscale(0.8) contrast(0.8);
+  opacity: 0.4;
+  pointer-events: none !important;
+}
+
+.test-mode-active .react-flow__edge {
+  opacity: 0.2;
+  stroke: #475569 !important;
+}
+
+.test-mode-active .manual-trigger-node {
+  z-index: 50 !important;
+  box-shadow: 0 0 40px -10px rgba(59, 130, 246, 0.6);
+  border-color: #3b82f6 !important;
+  transform: scale(1.02);
+}
+
+.test-mode-active .manual-trigger-node button {
+  animation: pulse-blue 2s infinite;
+}
+
+@keyframes pulse-blue {
+  0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
+  70% { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+}

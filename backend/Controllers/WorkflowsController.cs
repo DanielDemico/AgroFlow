@@ -14,11 +14,13 @@ public class WorkflowsController : ControllerBase
 {
     private readonly AppDbContext _context;
     private readonly INodeExecutorService _nodeExecutor;
+    private readonly IWorkflowSchedulerService _scheduler;
 
-    public WorkflowsController(AppDbContext context, INodeExecutorService nodeExecutor)
+    public WorkflowsController(AppDbContext context, INodeExecutorService nodeExecutor, IWorkflowSchedulerService scheduler)
     {
         _context = context;
         _nodeExecutor = nodeExecutor;
+        _scheduler = scheduler;
     }
 
     [HttpGet]
@@ -59,6 +61,12 @@ public class WorkflowsController : ControllerBase
         existing.IsActive = workflow.IsActive;
 
         await _context.SaveChangesAsync();
+
+        if (existing.IsActive) 
+            _scheduler.ScheduleWorkflow(id);
+        else 
+            _scheduler.UnscheduleWorkflow(id);
+
         return NoContent();
     }
 
@@ -70,6 +78,9 @@ public class WorkflowsController : ControllerBase
 
         _context.Workflows.Remove(workflow);
         await _context.SaveChangesAsync();
+
+        _scheduler.UnscheduleWorkflow(id);
+
         return NoContent();
     }
 
@@ -78,7 +89,7 @@ public class WorkflowsController : ControllerBase
     {
         try
         {
-            await _nodeExecutor.ExecuteWorkflowAsync(id);
+            await _scheduler.ManualTriggerAsync(id);
             return Ok(new { message = "Workflow execution completed." });
         }
         catch (Exception ex)
@@ -95,6 +106,11 @@ public class WorkflowsController : ControllerBase
 
         workflow.IsTesting = active;
         await _context.SaveChangesAsync();
+
+        if (active)
+            _scheduler.ScheduleWorkflow(id);
+        else
+            _scheduler.UnscheduleWorkflow(id);
 
         return Ok(new { isTesting = workflow.IsTesting });
     }

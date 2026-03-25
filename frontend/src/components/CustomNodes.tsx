@@ -1,6 +1,6 @@
 import React, { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
-import { Play, AlertTriangle, FileText, Clock } from 'lucide-react';
+import { Play, AlertTriangle, FileText, Clock, Map } from 'lucide-react';
 
 export const TriggerNode = memo(({ data, selected }: any) => {
   return (
@@ -64,6 +64,24 @@ export const ScheduleNode = memo(({ data, selected }: any) => {
         <div className="ml-2">
           <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Schedule</div>
           <div className="text-sm font-bold">Every {interval} {unit}</div>
+        </div>
+      </div>
+      <Handle type="source" position={Position.Right} className="w-3 h-3 bg-blue-500 border-2 border-slate-900" />
+    </div>
+  );
+});
+
+export const AreasNode = memo(({ data, selected }: any) => {
+  return (
+    <div className={`px-4 py-2 shadow-md rounded-md bg-slate-900 border-2 ${selected ? 'border-primary-500 shadow-lg shadow-blue-500/20' : 'border-blue-500'} text-white min-w-[150px]`}>
+      <Handle type="target" position={Position.Left} className="w-3 h-3 bg-slate-500 border-2 border-slate-900" />
+      <div className="flex items-center">
+        <div className="rounded-full w-8 h-8 flex items-center justify-center bg-blue-500/20 text-blue-500 mr-2">
+          <Map size={16} />
+        </div>
+        <div className="ml-2">
+          <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Geodata</div>
+          <div className="text-sm font-bold">{data.label || 'Areas Node'}</div>
         </div>
       </div>
       <Handle type="source" position={Position.Right} className="w-3 h-3 bg-blue-500 border-2 border-slate-900" />

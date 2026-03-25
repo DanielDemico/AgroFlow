@@ -1,3 +1,5 @@
+@import 'leaflet/dist/leaflet.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -75,4 +77,17 @@ body {
   0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
   70% { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); }
   100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+}
+
+/* LEAFLET OVERRIDES */
+.leaflet-container {
+  background: #020617 !important;
+}
+
+.leaflet-tile {
+  filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
+}
+
+.leaflet-control-attribution {
+  display: none !important;
 }

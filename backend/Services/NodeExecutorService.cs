@@ -28,9 +28,9 @@ public class NodeExecutorService : INodeExecutorService
             .Include(w => w.Connections)
             .FirstOrDefaultAsync(w => w.Id == workflowId);
 
-        if (workflow == null || !workflow.IsActive)
+        if (workflow == null || (!workflow.IsActive && !workflow.IsTesting))
         {
-            _logger.LogWarning("Workflow {WorkflowId} not found or inactive.", workflowId);
+            _logger.LogWarning("Workflow {WorkflowId} not found, inactive, or not in test mode.", workflowId);
             return;
         }
 

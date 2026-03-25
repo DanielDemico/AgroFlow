@@ -49,7 +49,9 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 // Auth Service
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<INodeExecutorService, NodeExecutorService>();
-builder.Services.AddHostedService<WorkflowSchedulerService>();
+builder.Services.AddSingleton<WorkflowSchedulerService>();
+builder.Services.AddSingleton<IWorkflowSchedulerService>(sp => sp.GetRequiredService<WorkflowSchedulerService>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<WorkflowSchedulerService>());
 
 // JWT Auth
 var jwtSettings = builder.Configuration.GetSection("Jwt");

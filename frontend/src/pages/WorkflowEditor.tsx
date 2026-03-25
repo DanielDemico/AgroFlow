@@ -17,15 +17,77 @@ import {
   BackgroundVariant,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { ArrowLeft, Play, Save, Plus, AlertCircle, Terminal, Info, Copy, Clipboard, Trash2, Clock, StopCircle } from 'lucide-react';
+import { ArrowLeft, Play, Save, Plus, AlertCircle, Terminal, Info, Copy, Clipboard, Trash2, Clock, StopCircle, Map as MapIcon } from 'lucide-react';
 import api from '../api/apiClient';
 import toast from 'react-hot-toast';
-import { TriggerNode, ActionNode, ScheduleNode } from '../components/CustomNodes';
+import { TriggerNode, ActionNode, ScheduleNode, AreasNode } from '../components/CustomNodes';
+import * as L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import * as toGeoJSON from '@tmcw/togeojson';
+// @ts-ignore
+import shp from 'shpjs';
 
 const nodeTypes = {
   trigger: TriggerNode,
   action: ActionNode,
   schedule: ScheduleNode,
+  areas: AreasNode,
+};
+
+const RawLeafletMap = ({ data }: { data: any }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<L.Map | null>(null);
+  const geoJsonLayerRef = useRef<L.GeoJSON | null>(null);
+
+  useEffect(() => {
+    if (containerRef.current && !mapRef.current) {
+      mapRef.current = L.map(containerRef.current, { 
+        zoomControl: false,
+        attributionControl: false 
+      }).setView([0, 0], 2);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapRef.current);
+    }
+    
+    const map = mapRef.current;
+    if (map) {
+      if (geoJsonLayerRef.current) {
+        map.removeLayer(geoJsonLayerRef.current);
+        geoJsonLayerRef.current = null;
+      }
+      
+      if (data && data.features && data.features.length > 0) {
+        try {
+          const layer = L.geoJSON(data, {
+            style: { color: '#3b82f6', weight: 2, fillOpacity: 0.3 }
+          }).addTo(map);
+          geoJsonLayerRef.current = layer;
+          
+          if (layer.getLayers().length > 0) {
+            map.fitBounds(layer.getBounds(), { padding: [20, 20] });
+          }
+        } catch (e) {
+          console.error("Failed to update map", e);
+        }
+      }
+    }
+    
+    return () => {
+      // We don't necessarily want to destroy the map on every re-render of data, 
+      // but we might want to on unmount.
+    };
+  }, [data]);
+
+  // Handle unmount
+  useEffect(() => {
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
+  }, []);
+
+  return <div ref={containerRef} style={{ height: '100%', width: '100%' }} />;
 };
 
 // Memoized Sub-components to prevent re-renders during node dragging
@@ -110,10 +172,49 @@ const NodeConfigPanel = React.memo(({ selectedNode, onSave, onDelete, onClose }:
     setLocalConfig(selectedNode?.data.config || {});
   }, [selectedNode?.id]);
 
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    const fileName = file.name.toLowerCase();
+
+    if (fileName.endsWith('.kml')) {
+      reader.onload = (event) => {
+        try {
+          const kmlContent = event.target?.result as string;
+          const parser = new DOMParser();
+          const kmlDoc = parser.parseFromString(kmlContent, 'text/xml');
+          const geoJson = toGeoJSON.kml(kmlDoc);
+          setLocalConfig({ ...localConfig, areasData: geoJson });
+          toast.success('KML parsed correctly');
+        } catch (err) {
+          toast.error('Failed to parse KML');
+        }
+      };
+      reader.readAsText(file);
+    } else if (fileName.endsWith('.zip')) {
+      reader.onload = async (event) => {
+        try {
+          const buffer = event.target?.result as ArrayBuffer;
+          const geoJson = await shp(buffer);
+          setLocalConfig({ ...localConfig, areasData: geoJson });
+          toast.success('Shapefile (ZIP) parsed correctly');
+        } catch (err) {
+          toast.error('Failed to parse Shapefile ZIP');
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    } else {
+      toast.error('Unsupported format. Use .kml or .zip for Shapefiles');
+    }
+  };
+
   if (!selectedNode) return null;
 
   const isTrigger = selectedNode.data.category === 'trigger';
   const isSchedule = selectedNode.data.category === 'schedule';
+  const isAreas = selectedNode.data.category === 'areas';
 
   return (
     <aside className="w-80 border-l border-slate-800 bg-slate-900 p-6 overflow-y-auto animate-in slide-in-from-right duration-200 shadow-2xl z-20">
@@ -164,7 +265,37 @@ const NodeConfigPanel = React.memo(({ selectedNode, onSave, onDelete, onClose }:
           </>
         )}
 
-        {!isTrigger && !isSchedule && (
+        {isAreas && (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Upload Areas</label>
+              <div className="p-4 bg-slate-800/50 border-2 border-dashed border-slate-700 rounded-xl text-center">
+                 <p className="text-[10px] text-slate-400 mb-3">
+                   Accepts <b>.kml</b> or <b>.zip</b> (containing .shp, .dbf, .shx)
+                 </p>
+                 <input 
+                   type="file" 
+                   accept=".kml,.zip" 
+                   onChange={handleFileUpload}
+                   className="hidden" 
+                   id="geo-upload"
+                 />
+                 <label 
+                   htmlFor="geo-upload"
+                   className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold cursor-pointer transition-colors inline-block"
+                 >
+                   Select File
+                 </label>
+              </div>
+            </div>
+
+            <div className="h-48 w-full rounded-xl overflow-hidden border border-slate-700 bg-slate-950">
+               <RawLeafletMap data={localConfig.areasData} />
+            </div>
+          </div>
+        )}
+
+        {!isTrigger && !isSchedule && !isAreas && (
           <div>
             <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Message</label>
             <textarea
@@ -246,6 +377,15 @@ const LeftSidebar = React.memo(() => (
           colorClass="green-400" 
           hoverClass="green-500/50" 
         />
+        <SidebarItem 
+          type="areas" 
+          actionType="areas" 
+          icon={MapIcon} 
+          title="Areas" 
+          description="Manage geographical areas" 
+          colorClass="green-400" 
+          hoverClass="green-500/50" 
+        />
       </div>
     </div>
     
@@ -280,10 +420,10 @@ const WorkflowEditor: React.FC = () => {
       
       const flowNodes = data.nodes.map((n: any) => ({
         id: n.id.toString(),
-        type: n.category === 'trigger' ? 'trigger' : (n.category === 'schedule' ? 'schedule' : 'action'),
+        type: n.category === 'trigger' ? 'trigger' : (n.category === 'schedule' ? 'schedule' : (n.category === 'areas' ? 'areas' : 'action')),
         position: { x: n.positionX, y: n.positionY },
         data: { 
-          label: n.category === 'trigger' ? 'Button Trigger' : (n.category === 'schedule' ? 'Schedule Trigger' : (JSON.parse(n.object).type === 'console_alert' ? 'Console Alert' : 'Print Log')),
+          label: n.category === 'trigger' ? 'Button Trigger' : (n.category === 'schedule' ? 'Schedule Trigger' : (n.category === 'areas' ? 'Areas Node' : (JSON.parse(n.object).type === 'console_alert' ? 'Console Alert' : 'Print Log'))),
           category: n.category,
           config: JSON.parse(n.object),
           onExecute: n.category === 'trigger' ? () => handleExecute(true) : undefined
@@ -387,7 +527,7 @@ const WorkflowEditor: React.FC = () => {
 
       const nodeConfig = type === 'trigger' 
         ? { type: 'button_trigger' }
-        : (type === 'schedule' ? { type: 'interval_trigger', intervalValue: 1, intervalUnit: 'minutes' } : { type: actionType, message: 'New Message' });
+        : (type === 'schedule' ? { type: 'interval_trigger', intervalValue: 1, intervalUnit: 'minutes' } : (type === 'areas' ? { type: 'areas', areasData: null } : { type: actionType, message: 'New Message' }));
 
       const tempId = `temp-${Date.now()}`;
       const newNode: Node = {
@@ -395,7 +535,7 @@ const WorkflowEditor: React.FC = () => {
         type,
         position,
         data: { 
-          label: type === 'trigger' ? 'Button Trigger' : (type === 'schedule' ? 'Schedule Trigger' : (actionType === 'console_alert' ? 'Console Alert' : 'Print Log')),
+          label: type === 'trigger' ? 'Button Trigger' : (type === 'schedule' ? 'Schedule Trigger' : (type === 'areas' ? 'Areas Node' : (actionType === 'console_alert' ? 'Console Alert' : 'Print Log'))),
           category: type,
           config: nodeConfig,
           onExecute: type === 'trigger' ? () => handleExecute(true) : undefined

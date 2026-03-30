@@ -26,6 +26,9 @@ const Dashboard: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newWorkflowName, setNewWorkflowName] = useState('');
   const [creating, setCreating] = useState(false);
+  const [workflowToDelete, setWorkflowToDelete] = useState<number | null>(null);
+  const [deleteConfirmationText, setDeleteConfirmationText] = useState('');
+  const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
   const userName = localStorage.getItem('userName');
   const userId = localStorage.getItem('userId');
@@ -57,7 +60,7 @@ const Dashboard: React.FC = () => {
     try {
       const { data } = await api.post('/workflows', { 
         name: newWorkflowName, 
-        isActive: true, 
+        isActive: false, 
         userId: Number(userId) 
       });
       toast.success('Workflow created!');
@@ -72,15 +75,25 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const handleDeleteWorkflow = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this workflow?')) return;
+  const openDeleteModal = (id: number) => {
+    setWorkflowToDelete(id);
+    setDeleteConfirmationText('');
+  };
+
+  const confirmDeleteWorkflow = async () => {
+    if (workflowToDelete === null) return;
+    setDeleting(true);
     try {
-      await api.delete(`/workflows/${id}`);
-      setWorkflows(workflows.filter(w => w.id !== id));
+      await api.delete(`/workflows/${workflowToDelete}`);
+      setWorkflows(workflows.filter(w => w.id !== workflowToDelete));
       toast.success('Workflow deleted');
       fetchData(); // Refresh stats
+      setWorkflowToDelete(null);
+      setDeleteConfirmationText('');
     } catch (error) {
       toast.error('Failed to delete workflow');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -192,6 +205,52 @@ const Dashboard: React.FC = () => {
           </form>
         </Modal>
 
+        {/* Delete Workflow Modal */}
+        <Modal 
+          isOpen={workflowToDelete !== null} 
+          onClose={() => {
+            setWorkflowToDelete(null);
+            setDeleteConfirmationText('');
+          }} 
+          title="Deletar Workflow"
+        >
+          <div className="space-y-4">
+            <p className="text-slate-400 text-sm">
+              Esta ação não pode ser desfeita. Por favor, digite <span className="font-bold text-red-400">Excluir</span> para confirmar.
+            </p>
+            <div>
+              <input
+                type="text"
+                value={deleteConfirmationText}
+                onChange={(e) => setDeleteConfirmationText(e.target.value)}
+                autoFocus
+                className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl focus:ring-2 focus:ring-red-500 outline-none transition-all"
+                placeholder="Digite Excluir"
+              />
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setWorkflowToDelete(null);
+                  setDeleteConfirmationText('');
+                }}
+                className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-medium transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteWorkflow}
+                disabled={deleting || deleteConfirmationText !== 'Excluir'}
+                className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-red-500/20 disabled:opacity-50"
+              >
+                {deleting ? 'Aguarde...' : 'Deletar'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+
         {/* Workflow Grid */}
         {loading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -213,7 +272,7 @@ const Dashboard: React.FC = () => {
                 name={w.name} 
                 isActive={w.isActive}
                 isTesting={w.isTesting}
-                onDelete={() => handleDeleteWorkflow(w.id)}
+                onDelete={() => openDeleteModal(w.id)}
                 onUpdate={fetchData}
               />
             ))}

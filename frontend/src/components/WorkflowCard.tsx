@@ -19,10 +19,65 @@ const WorkflowCard: React.FC<WorkflowCardProps> = ({ id, name, isActive, isTesti
   const handleToggleActive = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    
+    // Se for ativar, executa as validações primeiro
+    if (!isActive) {
+      setLoading(true);
+      try {
+        const { data } = await api.get(`/workflows/${id}`);
+        const nodes = data.nodes || [];
+        const connections = data.connections || [];
+        
+        let hasErrors = false;
+        
+        // 1. Workflow vazio
+        if (nodes.length === 0) {
+          toast.error('O workflow está vazio. Adicione nós antes de ativar.');
+          hasErrors = true;
+        }
+
+        // 2. Vários Scheculers
+        const scheduleNodes = nodes.filter((n: any) => n.category === 'schedule');
+        if (scheduleNodes.length > 1) {
+          toast.error(`O workflow não deve ter mais de um agendador. Encontrados: ${scheduleNodes.length}.`);
+          hasErrors = true;
+        }
+        
+        // 3. Nós soltos (sem nenhuma conexão de entrada ou saída)
+        if (nodes.length > 0) {
+          const connectedNodeIds = new Set<string>();
+          connections.forEach((c: any) => {
+            connectedNodeIds.add(c.sourceNodeId.toString());
+            connectedNodeIds.add(c.targetNodeId.toString());
+          });
+          
+          let looseNodesCount = 0;
+          nodes.forEach((n: any) => {
+            if (!connectedNodeIds.has(n.id.toString())) {
+              looseNodesCount++;
+            }
+          });
+          
+          if (looseNodesCount > 0) {
+            toast.error(`Atenção: Existem ${looseNodesCount} nó(s) solto(s). Conecte-os ou exclua-os.`);
+            hasErrors = true;
+          }
+        }
+        
+        // Libera o carregamento mas interrompe se houver erros
+        setLoading(false);
+        if (hasErrors) return;
+      } catch (err) {
+        toast.error('Falha ao validar o workflow.');
+        setLoading(false);
+        return;
+      }
+    }
+
     setLoading(true);
     try {
       await api.put(`/workflows/${id}`, { id, name, isActive: !isActive });
-      toast.success(isActive ? 'Workflow paused' : 'Workflow activated');
+      toast.success(isActive ? 'Workflow desativado' : 'Workflow ativado!');
       onUpdate();
     } catch (error) {
       toast.error('Failed to update status');

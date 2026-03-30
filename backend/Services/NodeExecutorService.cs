@@ -47,6 +47,9 @@ public class NodeExecutorService : INodeExecutorService
             }
         }
 
+        // Dictionary to hold outputs of each node
+        var nodeOutputs = new Dictionary<int, object>();
+
         // 2. Queue nodes with 0 in-degree (Triggers)
         var queue = new Queue<int>(inDegree.Where(x => x.Value == 0).Select(x => x.Key));
         
@@ -56,7 +59,15 @@ public class NodeExecutorService : INodeExecutorService
             var nodeId = queue.Dequeue();
             var node = workflow.Nodes.First(n => n.Id == nodeId);
 
-            await ExecuteNodeAsync(node);
+            // Get inputs from incoming connections
+            var inputConnections = workflow.Connections.Where(c => c.TargetNodeId == nodeId).ToList();
+            var inputs = inputConnections
+                .Where(c => nodeOutputs.ContainsKey(c.SourceNodeId))
+                .Select(c => nodeOutputs[c.SourceNodeId])
+                .ToList();
+
+            var output = await ExecuteNodeAsync(node, inputs);
+            nodeOutputs[nodeId] = output;
 
             foreach (var neighbor in adj[nodeId])
             {
@@ -69,25 +80,49 @@ public class NodeExecutorService : INodeExecutorService
         }
     }
 
-    private async Task ExecuteNodeAsync(Node node)
+    private async Task<object> ExecuteNodeAsync(Node node, List<object> inputs)
     {
         var config = JsonSerializer.Deserialize<JsonElement>(node.Object);
         var message = config.TryGetProperty("message", out var msgProp) ? msgProp.GetString() : "No message provided";
         var type = config.TryGetProperty("type", out var typeProp) ? typeProp.GetString() : "";
 
+        object nodeOutput = new { executedAt = DateTime.Now, nodeCategory = node.Category };
+
         if (node.Category == "trigger" || node.Category == "schedule")
         {
             _logger.LogInformation("[TRIGGER] {Category} ({Type}) executed at {Time}", node.Category, type, DateTime.Now);
         }
+        else if (node.Category == "areas")
+        {
+            if (config.TryGetProperty("areasData", out var areasData))
+            {
+                if (areasData.TryGetProperty("features", out var features))
+                {
+                    _logger.LogInformation("[AREAS] Extracted {Count} areas to pass to next node.", features.GetArrayLength());
+                    nodeOutput = features; // returning the JSON array of areas
+                }
+                else
+                {
+                    _logger.LogWarning("[AREAS] No features found in areasData.");
+                    nodeOutput = new { error = "No features array found" };
+                }
+            }
+            else
+            {
+                _logger.LogWarning("[AREAS] No areasData found in node config.");
+                nodeOutput = new { error = "No areas data" };
+            }
+        }
         else if (node.Category == "action")
         {
+            var serializedInputs = inputs.Count > 0 ? JsonSerializer.Serialize(inputs) : "No inputs received";
             switch (type)
             {
                 case "console_alert":
-                    Console.WriteLine($"[ALERT]: {message}");
+                    Console.WriteLine($"[ALERT]: {message} | Inputs: {serializedInputs}");
                     break;
                 case "print_log":
-                    Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [LOG]: {message}");
+                    Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [LOG]: {message} | Inputs: {serializedInputs}");
                     break;
                 default:
                     _logger.LogWarning("Unknown action type: {Type}", type);
@@ -96,5 +131,6 @@ public class NodeExecutorService : INodeExecutorService
         }
 
         await Task.CompletedTask;
+        return nodeOutput;
     }
 }

@@ -269,4 +269,6 @@ Foram criados fisicamente no projeto os seguintes arquivos para habilitar a exec
 4. `docker-compose.yml` (Orquestrador multi-container para subir toda a aplicação de uma vez)
 
 ## 🐛 Erros Resolvidos
-Nenhum erro ocorreu durante a execução deste prompt.
+1. **Erro de Dependência Peer (npm ERESOLVE) no build do Frontend**:
+   - **Causa**: O pacote `@react-leaflet/core` instalado exige o React 19 como dependência peer, enquanto o projeto utiliza a versão 18. Isso causava a falha do comando `npm ci` durante a build do Docker.
+   - **Resolução**: Alterou-se o `frontend/Dockerfile` de `RUN npm ci` para `RUN npm ci --legacy-peer-deps` a fim de contornar a validação estrita de conflitos de peer-dependencies durante a compilação do container.

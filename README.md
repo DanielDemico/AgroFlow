@@ -30,8 +30,13 @@ A full-stack replica of a workflow automation tool like N8N.
 ### Frontend
 1. Navigate to the `frontend` folder.
 2. Run `npm install` to install dependencies.
-3. Copy `.env.example` to `.env` (if provided) or ensure `apiClient.ts` points to the correct backend URL.
-4. Run `npm run dev` to start the Vite development server.
+3. Copy `.env.example` to `.env` and confirm `VITE_API_BASE_URL=/api`.
+4. Run `npm run build` to generate production assets.
+
+### Azure / nginx
+1. Build the frontend and make the `dist` contents available under your nginx site root.
+2. Run the backend API on the VM at `http://127.0.0.1:5188`.
+3. Use `nginx.conf` as a reverse proxy so browser requests go to the static frontend and `/api/*` forwards to the backend.
 
 ## 📂 Project Structure
 

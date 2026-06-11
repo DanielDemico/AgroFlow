@@ -1,7 +1,9 @@
 import axios from 'axios';
 
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
+
 const api = axios.create({
-  baseURL: 'http://localhost:5188', // Standard .NET port, check if it changes
+  baseURL: apiBaseUrl,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -24,7 +26,7 @@ api.interceptors.response.use(
       const refreshToken = localStorage.getItem('refreshToken');
       if (refreshToken) {
         try {
-          const { data } = await axios.post('http://localhost:5188/auth/refresh', {
+          const { data } = await api.post('/auth/refresh', {
             refreshToken,
           });
           localStorage.setItem('accessToken', data.accessToken);

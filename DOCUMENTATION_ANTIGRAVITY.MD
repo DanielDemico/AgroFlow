@@ -267,8 +267,12 @@ Foram criados fisicamente no projeto os seguintes arquivos para habilitar a exec
 2. `frontend/Dockerfile` (Arquivo de build do frontend React + Nginx)
 3. `nginx.docker.conf` (Configuração do Nginx adaptada para rotas do ambiente Docker)
 4. `docker-compose.yml` (Orquestrador multi-container para subir toda a aplicação de uma vez)
+5. `frontend/tsconfig.json` (Arquivo de configuração do TypeScript para permitir a compilação local e no container)
 
 ## 🐛 Erros Resolvidos
 1. **Erro de Dependência Peer (npm ERESOLVE) no build do Frontend**:
    - **Causa**: O pacote `@react-leaflet/core` instalado exige o React 19 como dependência peer, enquanto o projeto utiliza a versão 18. Isso causava a falha do comando `npm ci` durante a build do Docker.
    - **Resolução**: Alterou-se o `frontend/Dockerfile` de `RUN npm ci` para `RUN npm ci --legacy-peer-deps` a fim de contornar a validação estrita de conflitos de peer-dependencies durante a compilação do container.
+2. **Erro de help do tsc (TypeScript Compiler) no build do Frontend**:
+   - **Causa**: A ausência do arquivo `tsconfig.json` na pasta do frontend fazia com que o script de build (`tsc && vite build`) falhasse na etapa do `tsc`, fazendo com que ele apenas imprimisse sua ajuda na tela e saísse com código de erro.
+   - **Resolução**: Criou-se o arquivo `frontend/tsconfig.json` com configurações padrão do React + Vite e suporte aos tipos de ambiente do Vite (`"types": ["vite/client"]`) para permitir que o compilador do TypeScript realize o build com sucesso.

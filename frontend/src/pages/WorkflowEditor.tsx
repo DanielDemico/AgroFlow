@@ -15,12 +15,13 @@ import {
   Connection,
   ConnectionLineType,
   BackgroundVariant,
+  useReactFlow,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { ArrowLeft, Play, Save, Plus, AlertCircle, Terminal, Info, Copy, Clipboard, Trash2, Clock, StopCircle, Map as MapIcon } from 'lucide-react';
+import { ArrowLeft, Play, Save, Plus, AlertCircle, Terminal, Info, Copy, Clipboard, Trash2, Clock, StopCircle, Map as MapIcon, Leaf, TrendingUp, BarChart3, Activity, Mail } from 'lucide-react';
 import api from '../api/apiClient';
 import toast from 'react-hot-toast';
-import { TriggerNode, ActionNode, ScheduleNode, AreasNode } from '../components/CustomNodes';
+import { TriggerNode, ActionNode, ScheduleNode, AreasNode, NdviNode, AnalysisTemporalNode, AnalysisBoxplotNode, AnalysisBarNode, EmailNode, getNdviDataForNode, getEmailBodyForNode } from '../components/CustomNodes';
 import * as L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import * as toGeoJSON from '@tmcw/togeojson';
@@ -32,6 +33,11 @@ const nodeTypes = {
   action: ActionNode,
   schedule: ScheduleNode,
   areas: AreasNode,
+  ndvi: NdviNode,
+  analysis_temporal: AnalysisTemporalNode,
+  analysis_boxplot: AnalysisBoxplotNode,
+  analysis_bar: AnalysisBarNode,
+  email: EmailNode,
 };
 
 const RawLeafletMap = ({ data }: { data: any }) => {
@@ -167,10 +173,245 @@ const SidebarItem = React.memo(({ type, actionType, icon: Icon, title, descripti
 
 const NodeConfigPanel = React.memo(({ selectedNode, onSave, onDelete, onClose }: any) => {
   const [localConfig, setLocalConfig] = useState(selectedNode?.data.config || {});
+  const { getNodes, getEdges } = useReactFlow();
 
   useEffect(() => {
     setLocalConfig(selectedNode?.data.config || {});
   }, [selectedNode?.id]);
+
+  const ndviData = selectedNode ? getNdviDataForNode(selectedNode.id, getNodes, getEdges) : [];
+  const isConnected = ndviData.length > 0;
+  const isExecuted = selectedNode?.data?.isExecuted || false;
+  const emailBody = selectedNode && selectedNode.data.category === 'email' ? getEmailBodyForNode(selectedNode.id, getNodes, getEdges) : '';
+  const isEmailConnected = emailBody.length > 0;
+
+  const renderLargeTemporalChart = () => {
+    if (!isConnected) return <p className="text-xs text-amber-500">Nenhum dado de NDVI disponível. Conecte a um nó de NDVI.</p>;
+    if (!isExecuted) return <p className="text-xs text-slate-500 bg-slate-950/40 p-3 rounded-lg border border-slate-800/80 text-center font-medium">Aguardando execução do workflow para exibir o gráfico.</p>;
+
+    const width = 270;
+    const height = 150;
+    const paddingLeft = 30;
+    const paddingRight = 15;
+    const paddingTop = 15;
+    const paddingBottom = 25;
+    
+    const chartWidth = width - paddingLeft - paddingRight;
+    const chartHeight = height - paddingTop - paddingBottom;
+    
+    const months = ndviData[0]?.temporalSeries.map((t: any) => t.date) || [];
+    const pointsCount = months.length;
+    
+    const getX = (index: number) => paddingLeft + index * (chartWidth / Math.max(1, pointsCount - 1));
+    const getY = (val: number) => {
+      const clamped = Math.min(1.0, Math.max(0.0, val));
+      return paddingTop + chartHeight - (clamped * chartHeight);
+    };
+
+    return (
+      <div className="bg-slate-950/60 p-2 rounded-xl border border-slate-800 mt-2">
+        <svg width={width} height={height}>
+          {[0, 0.25, 0.5, 0.75, 1.0].map((val, idx) => {
+            const y = getY(val);
+            return (
+              <g key={idx}>
+                <line x1={paddingLeft} y1={y} x2={width - paddingRight} y2={y} stroke="#334155" strokeWidth="0.5" strokeDasharray="2,2" />
+                <text x={paddingLeft - 5} y={y + 3} fill="#64748b" fontSize="8" textAnchor="end">{val}</text>
+              </g>
+            );
+          })}
+          
+          {ndviData.map((area: any, areaIdx: number) => {
+            const points = area.temporalSeries.map((p: any, idx: number) => {
+              return `${getX(idx)},${getY(p.ndvi)}`;
+            }).join(' ');
+            
+            return (
+              <g key={areaIdx}>
+                <polyline fill="none" stroke={area.color} strokeWidth="2" points={points} />
+                {area.temporalSeries.map((p: any, idx: number) => (
+                  <circle key={idx} cx={getX(idx)} cy={getY(p.ndvi)} r="3" fill="#0f172a" stroke={area.color} strokeWidth="2" />
+                ))}
+              </g>
+            );
+          })}
+
+          {months.map((m, idx) => {
+            if (pointsCount === 12 && idx % 2 !== 0) return null;
+            return (
+              <text key={idx} x={getX(idx)} y={height - 5} fill="#64748b" fontSize="8" textAnchor="middle">{m}</text>
+            );
+          })}
+        </svg>
+        
+        <div className="mt-2 flex flex-wrap gap-2 max-h-[60px] overflow-y-auto pt-1 border-t border-slate-800/60">
+          {ndviData.map((area: any, idx: number) => (
+            <div key={idx} className="flex items-center gap-1 text-[10px]">
+              <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: area.color }} />
+              <span className="text-slate-400 font-semibold truncate max-w-[80px]">{area.name}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const renderLargeBoxplot = () => {
+    if (!isConnected) return <p className="text-xs text-amber-500">Nenhum dado de NDVI disponível. Conecte a um nó de NDVI.</p>;
+    if (!isExecuted) return <p className="text-xs text-slate-500 bg-slate-950/40 p-3 rounded-lg border border-slate-800/80 text-center font-medium">Aguardando execução do workflow para exibir o gráfico.</p>;
+
+    const width = 270;
+    const rowHeight = 30;
+    const headerHeight = 20;
+    const paddingLeft = 60;
+    const paddingRight = 15;
+    const height = headerHeight + ndviData.length * rowHeight + 15;
+
+    const chartWidth = width - paddingLeft - paddingRight;
+    const getX = (val: number) => {
+      const clamped = Math.min(1.0, Math.max(0.0, val));
+      return paddingLeft + clamped * chartWidth;
+    };
+
+    return (
+      <div className="bg-slate-950/60 p-2 rounded-xl border border-slate-800 mt-2 max-h-[260px] overflow-y-auto custom-scrollbar">
+        <svg width={width} height={height}>
+          {[0, 0.2, 0.4, 0.6, 0.8, 1.0].map((val, idx) => {
+            const x = getX(val);
+            return (
+              <g key={idx}>
+                <line x1={x} y1={headerHeight} x2={x} y2={height - 15} stroke="#334155" strokeWidth="0.5" strokeDasharray="1,2" />
+                <text x={x} y={12} fill="#64748b" fontSize="8" textAnchor="middle">{val}</text>
+              </g>
+            );
+          })}
+
+          {ndviData.map((area: any, idx: number) => {
+            const bp = area.boxplot;
+            const y = headerHeight + idx * rowHeight + 15;
+            const boxHeight = 12;
+            
+            return (
+              <g key={idx}>
+                <text 
+                  x={paddingLeft - 8} 
+                  y={y + 3} 
+                  fill="#94a3b8" 
+                  fontSize="9" 
+                  textAnchor="end" 
+                  className="font-bold truncate"
+                >
+                  {area.name.length > 9 ? `${area.name.substring(0, 8)}…` : area.name}
+                  <title>{area.name}</title>
+                </text>
+
+                <line x1={getX(bp.min)} y1={y} x2={getX(bp.max)} y2={y} stroke="#64748b" strokeWidth="1.5" />
+                <line x1={getX(bp.min)} y1={y - boxHeight / 2} x2={getX(bp.min)} y2={y + boxHeight / 2} stroke="#64748b" strokeWidth="1.5" />
+                <line x1={getX(bp.max)} y1={y - boxHeight / 2} x2={getX(bp.max)} y2={y + boxHeight / 2} stroke="#64748b" strokeWidth="1.5" />
+
+                <rect 
+                  x={getX(bp.q1)} 
+                  y={y - boxHeight / 2} 
+                  width={getX(bp.q3) - getX(bp.q1)} 
+                  height={boxHeight} 
+                  fill={area.color} 
+                  fillOpacity="0.4"
+                  stroke={area.color} 
+                  strokeWidth="1.5" 
+                  rx="1"
+                />
+
+                <line x1={getX(bp.median)} y1={y - boxHeight / 2} x2={getX(bp.median)} y2={y + boxHeight / 2} stroke="#ffffff" strokeWidth="2" />
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+    );
+  };
+
+  const renderLargeBarChart = () => {
+    if (!isConnected) return <p className="text-xs text-amber-500">Nenhum dado de NDVI disponível. Conecte a um nó de NDVI.</p>;
+    if (!isExecuted) return <p className="text-xs text-slate-500 bg-slate-950/40 p-3 rounded-lg border border-slate-800/80 text-center font-medium">Aguardando execução do workflow para exibir o gráfico.</p>;
+
+    const width = 270;
+    const height = 150;
+    const paddingLeft = 30;
+    const paddingRight = 15;
+    const paddingTop = 15;
+    const paddingBottom = 25;
+
+    const chartWidth = width - paddingLeft - paddingRight;
+    const chartHeight = height - paddingTop - paddingBottom;
+
+    const barSpacing = 10;
+    const barWidth = Math.max(15, Math.min(35, (chartWidth / ndviData.length) - barSpacing));
+    const totalBarsWidth = ndviData.length * (barWidth + barSpacing) - barSpacing;
+    const startX = paddingLeft + (chartWidth - totalBarsWidth) / 2;
+
+    const getY = (val: number) => {
+      const clamped = Math.min(1.0, Math.max(0.0, val));
+      return paddingTop + chartHeight - (clamped * chartHeight);
+    };
+
+    return (
+      <div className="bg-slate-950/60 p-2 rounded-xl border border-slate-800 mt-2">
+        <svg width={width} height={height}>
+          {[0, 0.25, 0.5, 0.75, 1.0].map((val, idx) => {
+            const y = getY(val);
+            return (
+              <g key={idx}>
+                <line x1={paddingLeft} y1={y} x2={width - paddingRight} y2={y} stroke="#334155" strokeWidth="0.5" strokeDasharray="1,2" />
+                <text x={paddingLeft - 5} y={y + 3} fill="#64748b" fontSize="8" textAnchor="end">{val}</text>
+              </g>
+            );
+          })}
+
+          {ndviData.map((area: any, idx: number) => {
+            const x = startX + idx * (barWidth + barSpacing);
+            const y = getY(area.currentNdvi);
+            const barHeight = Math.max(2, paddingTop + chartHeight - y);
+
+            return (
+              <g key={idx}>
+                <rect
+                  x={x}
+                  y={y}
+                  width={barWidth}
+                  height={barHeight}
+                  fill={area.color}
+                  rx="2"
+                  className="transition-all duration-300 hover:brightness-110"
+                />
+                <text
+                  x={x + barWidth / 2}
+                  y={height - 10}
+                  fill="#94a3b8"
+                  fontSize="8"
+                  textAnchor="middle"
+                  className="font-bold"
+                >
+                  {idx + 1}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+
+        <div className="mt-2 flex flex-col gap-1 max-h-[70px] overflow-y-auto pt-1 border-t border-slate-800/60 text-[10px]">
+          {ndviData.map((area: any, idx: number) => (
+            <div key={idx} className="flex justify-between text-slate-400">
+              <span className="flex items-center gap-1.5 font-medium truncate max-w-[170px]">
+                <span className="w-2.5 h-2.5 text-center flex items-center justify-center font-bold text-[8px] bg-slate-800 rounded border border-slate-700 text-slate-300">{idx + 1}</span>
+                {area.name}
+              </span>
+              <span className="font-bold" style={{ color: area.color }}>{area.currentNdvi} ({area.classification})</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -215,6 +456,11 @@ const NodeConfigPanel = React.memo(({ selectedNode, onSave, onDelete, onClose }:
   const isTrigger = selectedNode.data.category === 'trigger';
   const isSchedule = selectedNode.data.category === 'schedule';
   const isAreas = selectedNode.data.category === 'areas';
+  const isNdvi = selectedNode.data.category === 'ndvi';
+  const isAnalysisTemporal = selectedNode.data.category === 'analysis_temporal';
+  const isAnalysisBoxplot = selectedNode.data.category === 'analysis_boxplot';
+  const isAnalysisBar = selectedNode.data.category === 'analysis_bar';
+  const isEmail = selectedNode.data.category === 'email';
 
   return (
     <aside className="w-80 border-l border-slate-800 bg-slate-900 p-6 overflow-y-auto animate-in slide-in-from-right duration-200 shadow-2xl z-20">
@@ -268,6 +514,17 @@ const NodeConfigPanel = React.memo(({ selectedNode, onSave, onDelete, onClose }:
         {isAreas && (
           <div className="space-y-4">
             <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Nome da Área</label>
+              <input
+                type="text"
+                value={localConfig.areaName || ''}
+                onChange={(e) => setLocalConfig({ ...localConfig, areaName: e.target.value })}
+                className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-xl focus:ring-2 focus:ring-primary-500 outline-none text-sm"
+                placeholder="Ex: Talhão A, Fazenda Sul"
+              />
+            </div>
+
+            <div>
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Upload Areas</label>
               <div className="p-4 bg-slate-800/50 border-2 border-dashed border-slate-700 rounded-xl text-center">
                  <p className="text-[10px] text-slate-400 mb-3">
@@ -295,7 +552,189 @@ const NodeConfigPanel = React.memo(({ selectedNode, onSave, onDelete, onClose }:
           </div>
         )}
 
-        {!isTrigger && !isSchedule && !isAreas && (
+        {isNdvi && (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Método de Cálculo</label>
+              <select
+                value={localConfig.ndviMethod || 'sentinel'}
+                onChange={(e) => setLocalConfig({ ...localConfig, ndviMethod: e.target.value })}
+                className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-xl focus:ring-2 focus:ring-primary-500 outline-none text-sm mb-4"
+              >
+                <option value="sentinel">Sentinel-2 (Red-NIR)</option>
+                <option value="landsat">Landsat-8 (Red-NIR)</option>
+                <option value="simulation">Simulação Local</option>
+              </select>
+
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Range de Tempo (Histórico)</label>
+              <select
+                value={localConfig.periodMonths || 6}
+                onChange={(e) => setLocalConfig({ ...localConfig, periodMonths: parseInt(e.target.value) })}
+                className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-xl focus:ring-2 focus:ring-primary-500 outline-none text-sm"
+              >
+                <option value={3}>Últimos 3 meses</option>
+                <option value={6}>Últimos 6 meses</option>
+                <option value={12}>Último ano (12 meses)</option>
+              </select>
+            </div>
+            <p className="text-xs text-slate-400">
+              O processador NDVI calculará automaticamente os índices vegetativos de todas as feições geográficas conectadas no período histórico selecionado.
+            </p>
+            {isExecuted && isConnected && (
+              <div className="space-y-4">
+                {/* Visual Distribution Bar */}
+                <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 mt-2">
+                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-2">Distribuição de Saúde</span>
+                  <div className="h-3 w-full bg-slate-800 rounded-full overflow-hidden flex">
+                    {(() => {
+                      const total = ndviData.length;
+                      const counts = {
+                        MuitoAlto: ndviData.filter((d: any) => d.classification === 'Muito Alto').length,
+                        Alto: ndviData.filter((d: any) => d.classification === 'Alto').length,
+                        Moderado: ndviData.filter((d: any) => d.classification === 'Moderado').length,
+                        Baixo: ndviData.filter((d: any) => d.classification === 'Baixo').length,
+                        Nulo: ndviData.filter((d: any) => d.classification === 'Nulo/Água').length,
+                      };
+                      return (
+                        <>
+                          {counts.MuitoAlto > 0 && <div className="h-full bg-[#047857]" style={{ width: `${(counts.MuitoAlto / total) * 100}%` }} title={`Muito Alto: ${counts.MuitoAlto}`} />}
+                          {counts.Alto > 0 && <div className="h-full bg-[#10b981]" style={{ width: `${(counts.Alto / total) * 100}%` }} title={`Alto: ${counts.Alto}`} />}
+                          {counts.Moderado > 0 && <div className="h-full bg-[#84cc16]" style={{ width: `${(counts.Moderado / total) * 100}%` }} title={`Moderado: ${counts.Moderado}`} />}
+                          {counts.Baixo > 0 && <div className="h-full bg-[#eab308]" style={{ width: `${(counts.Baixo / total) * 100}%` }} title={`Baixo: ${counts.Baixo}`} />}
+                          {counts.Nulo > 0 && <div className="h-full bg-[#3b82f6]" style={{ width: `${(counts.Nulo / total) * 100}%` }} title={`Nulo/Água: ${counts.Nulo}`} />}
+                        </>
+                      );
+                    })()}
+                  </div>
+                  <div className="flex justify-between items-center mt-2 text-[9px] text-slate-400 flex-wrap gap-2">
+                    <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[#047857]" /> Muito Alto</span>
+                    <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[#10b981]" /> Alto</span>
+                    <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[#84cc16]" /> Moderado</span>
+                    <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[#eab308]" /> Baixo</span>
+                  </div>
+                </div>
+
+                <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 mt-2 space-y-2 max-h-[200px] overflow-y-auto custom-scrollbar">
+                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Resultados das Áreas</span>
+                  {ndviData.map((area: any, idx: number) => (
+                    <div key={idx} className="flex justify-between text-xs font-semibold py-1 border-b border-slate-900 last:border-0 text-[10px]">
+                      <span className="text-slate-400 truncate max-w-[130px]">{area.name}</span>
+                      <span style={{ color: area.color }}>{area.currentNdvi} ({area.classification})</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {isConnected && !isExecuted && (
+              <div className="bg-slate-950/40 p-4 rounded-xl border border-slate-800/80 text-center">
+                <p className="text-xs text-slate-500 font-medium">Aguardando execução do workflow para calcular o NDVI.</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {isAnalysisTemporal && (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Análise Temporal de NDVI</label>
+              <div className="px-3 py-2 bg-slate-800 rounded-lg text-slate-400 text-xs border border-slate-700">
+                Dados vinculados ao processador NDVI.
+              </div>
+            </div>
+            <p className="text-xs text-slate-400">
+              Plota curvas temporais comparativas de NDVI obtidos a partir do nó NDVI conectado. O período histórico é herdado do nó de NDVI.
+            </p>
+            {renderLargeTemporalChart()}
+          </div>
+        )}
+
+        {isAnalysisBoxplot && (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Opções Estatísticas</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="show-outliers"
+                  checked={localConfig.showOutliers ?? true}
+                  onChange={(e) => setLocalConfig({ ...localConfig, showOutliers: e.target.checked })}
+                  className="w-4 h-4 rounded border-slate-700 bg-slate-800 text-primary-600 focus:ring-primary-500 focus:ring-offset-slate-900"
+                />
+                <label htmlFor="show-outliers" className="text-sm text-slate-300">Mostrar Outliers</label>
+              </div>
+            </div>
+            <p className="text-xs text-slate-400">
+              Exibe a distribuição de dispersão estatística (Mín, Q1, Mediana, Q3, Máx) do NDVI por talhão.
+            </p>
+            {renderLargeBoxplot()}
+          </div>
+        )}
+
+        {isAnalysisBar && (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Cor do Gráfico</label>
+              <select
+                value={localConfig.barColorTheme || 'emerald'}
+                onChange={(e) => setLocalConfig({ ...localConfig, barColorTheme: e.target.value })}
+                className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-xl focus:ring-2 focus:ring-primary-500 outline-none text-sm"
+              >
+                <option value="emerald">Verde Vegetação (Emerald)</option>
+                <option value="blue">Azul Água (Sky)</option>
+                <option value="orange">Laranja Solo (Orange)</option>
+              </select>
+            </div>
+            <p className="text-xs text-slate-400">
+              Exibe a comparação direta do nível médio atual de NDVI entre os talhões.
+            </p>
+            {renderLargeBarChart()}
+          </div>
+        )}
+
+        {isEmail && (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Destinatário (To)</label>
+              <input
+                type="email"
+                value={localConfig.to || 'produtor@agroflow.com'}
+                onChange={(e) => setLocalConfig({ ...localConfig, to: e.target.value })}
+                className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-xl focus:ring-2 focus:ring-primary-500 outline-none text-sm mb-4"
+                placeholder="destinatario@agroflow.com"
+              />
+
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Assunto (Subject)</label>
+              <input
+                type="text"
+                value={localConfig.subject || 'Relatório de Monitoramento NDVI - AgroFlow'}
+                onChange={(e) => setLocalConfig({ ...localConfig, subject: e.target.value })}
+                className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-xl focus:ring-2 focus:ring-primary-500 outline-none text-sm"
+              />
+            </div>
+            <p className="text-xs text-slate-400">
+              Gera um relatório formatado em HTML com base nos dados vegetativos do fluxo conectado.
+            </p>
+            {isExecuted && isEmailConnected ? (
+              <div className="space-y-2">
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Visualização do E-mail</span>
+                <div 
+                  className="bg-white rounded-xl border border-slate-700 overflow-hidden max-h-[350px] overflow-y-auto p-3 custom-scrollbar scale-95 origin-top text-black"
+                  dangerouslySetInnerHTML={{ __html: emailBody }}
+                />
+              </div>
+            ) : isEmailConnected && !isExecuted ? (
+              <div className="bg-slate-950/40 p-4 rounded-xl border border-slate-800/80 text-center">
+                <p className="text-xs text-slate-500 font-medium">Aguardando execução do workflow para exibir o e-mail.</p>
+              </div>
+            ) : (
+              <div className="bg-slate-950/40 p-4 rounded-xl border border-slate-800/80 text-center text-amber-500 text-xs">
+                <p className="font-medium">Nenhum dado recebido. Conecte o nó de e-mail ao NDVI ou a um nó de análise.</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {!isTrigger && !isSchedule && !isAreas && !isNdvi && !isAnalysisTemporal && !isAnalysisBoxplot && !isAnalysisBar && !isEmail && (
           <div>
             <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Message</label>
             <textarea
@@ -386,6 +825,57 @@ const LeftSidebar = React.memo(() => (
           colorClass="green-400" 
           hoverClass="green-500/50" 
         />
+        <SidebarItem 
+          type="email" 
+          actionType="email" 
+          icon={Mail} 
+          title="Email Node" 
+          description="Produces HTML report email" 
+          colorClass="purple-400" 
+          hoverClass="purple-500/50" 
+        />
+      </div>
+    </div>
+
+    <div className="mb-8">
+      <h2 className="text-xs font-bold text-emerald-500 uppercase tracking-widest mb-4">NDVI & Análise</h2>
+      <div className="space-y-3">
+        <SidebarItem 
+          type="ndvi" 
+          actionType="ndvi" 
+          icon={Leaf} 
+          title="NDVI Node" 
+          description="Processamento de NDVI" 
+          colorClass="emerald-400" 
+          hoverClass="emerald-500/50" 
+        />
+        <SidebarItem 
+          type="analysis_temporal" 
+          actionType="analysis_temporal" 
+          icon={TrendingUp} 
+          title="Análise Temporal" 
+          description="Evolução temporal do NDVI" 
+          colorClass="indigo-400" 
+          hoverClass="indigo-500/50" 
+        />
+        <SidebarItem 
+          type="analysis_boxplot" 
+          actionType="analysis_boxplot" 
+          icon={Activity} 
+          title="Análise Boxplot" 
+          description="Dispersão estatística" 
+          colorClass="fuchsia-400" 
+          hoverClass="fuchsia-500/50" 
+        />
+        <SidebarItem 
+          type="analysis_bar" 
+          actionType="analysis_bar" 
+          icon={BarChart3} 
+          title="Gráfico de Barras" 
+          description="Comparativo de NDVI por área" 
+          colorClass="orange-400" 
+          hoverClass="orange-500/50" 
+        />
       </div>
     </div>
     
@@ -412,23 +902,60 @@ const WorkflowEditor: React.FC = () => {
   const [clipboard, setClipboard] = useState<Node | null>(null);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
+  const handleExecuteRef = useRef<any>(null);
 
   const loadWorkflow = async () => {
     try {
       const { data } = await api.get(`/workflows/${id}`);
       setWorkflowName(data.name);
       
-      const flowNodes = data.nodes.map((n: any) => ({
-        id: n.id.toString(),
-        type: n.category === 'trigger' ? 'trigger' : (n.category === 'schedule' ? 'schedule' : (n.category === 'areas' ? 'areas' : 'action')),
-        position: { x: n.positionX, y: n.positionY },
-        data: { 
-          label: n.category === 'trigger' ? 'Button Trigger' : (n.category === 'schedule' ? 'Schedule Trigger' : (n.category === 'areas' ? 'Areas Node' : (JSON.parse(n.object).type === 'console_alert' ? 'Console Alert' : 'Print Log'))),
-          category: n.category,
-          config: JSON.parse(n.object),
-          onExecute: n.category === 'trigger' ? () => handleExecute(true) : undefined
-        },
-      }));
+      const flowNodes = data.nodes.map((n: any) => {
+        const category = n.category;
+        const config = JSON.parse(n.object);
+        let type = 'action';
+        let label = 'Print Log';
+        
+        if (category === 'trigger') {
+          type = 'trigger';
+          label = 'Button Trigger';
+        } else if (category === 'schedule') {
+          type = 'schedule';
+          label = 'Schedule Trigger';
+        } else if (category === 'areas') {
+          type = 'areas';
+          label = 'Areas Node';
+        } else if (category === 'ndvi') {
+          type = 'ndvi';
+          label = 'NDVI Node';
+        } else if (category === 'analysis_temporal') {
+          type = 'analysis_temporal';
+          label = 'Análise Temporal';
+        } else if (category === 'analysis_boxplot') {
+          type = 'analysis_boxplot';
+          label = 'Análise Boxplot';
+        } else if (category === 'analysis_bar') {
+          type = 'analysis_bar';
+          label = 'Gráfico de Barra';
+        } else if (category === 'email') {
+          type = 'email';
+          label = 'Email Node';
+        } else {
+          label = config.type === 'console_alert' ? 'Console Alert' : 'Print Log';
+        }
+
+        return {
+          id: n.id.toString(),
+          type,
+          position: { x: n.positionX, y: n.positionY },
+          data: { 
+            label,
+            category,
+            config,
+            isExecuted: false,
+            onExecute: category === 'trigger' ? () => handleExecuteRef.current?.(true) : undefined
+          },
+        };
+      });
 
       const flowEdges = data.connections.map((c: any) => ({
         id: c.id.toString(),
@@ -465,6 +992,7 @@ const WorkflowEditor: React.FC = () => {
       try {
         await api.post(`/workflows/${id}/execute`);
         toast.success('Manual trigger fired!');
+        setNodes((nds) => nds.map(n => ({ ...n, data: { ...n.data, isExecuted: true } })));
       } catch (error) {
         toast.error('Trigger failed');
       }
@@ -478,18 +1006,32 @@ const WorkflowEditor: React.FC = () => {
       await api.post(`/workflows/${id}/toggle-test?active=${newState}`);
       if (newState) {
         toast.success('Test mode activated. Scheduler is now running in backend.');
+        setNodes((nds) => nds.map(n => ({ ...n, data: { ...n.data, isExecuted: true } })));
       } else {
         toast.success('Test mode deactivated.');
         if (testIntervalRef.current) clearInterval(testIntervalRef.current);
+        setNodes((nds) => nds.map(n => ({ ...n, data: { ...n.data, isExecuted: false } })));
       }
     } catch (error) {
       toast.error('Failed to toggle test mode');
       setIsTesting(!newState);
     }
-  }, [id, isTesting]);
+  }, [id, isTesting, setNodes]);
+
+  useEffect(() => {
+    handleExecuteRef.current = handleExecute;
+  }, [handleExecute]);
 
   const onConnect = useCallback(
     async (params: Connection) => {
+      const sourceNode = nodes.find(n => n.id === params.source);
+      const targetNode = nodes.find(n => n.id === params.target);
+      
+      if (sourceNode?.type === 'trigger' && targetNode?.type === 'email') {
+        toast.error('O nó de Gatilho de Botão não pode se conectar diretamente ao nó de E-mail.');
+        return;
+      }
+
       try {
         const { data } = await api.post('/connections', {
           sourceNodeId: parseInt(params.source!),
@@ -503,7 +1045,19 @@ const WorkflowEditor: React.FC = () => {
         toast.error('Failed to create connection');
       }
     },
-    [id, setEdges]
+    [id, setEdges, nodes]
+  );
+
+  const isValidConnection = useCallback(
+    (connection: Connection) => {
+      const sourceNode = nodes.find(n => n.id === connection.source);
+      const targetNode = nodes.find(n => n.id === connection.target);
+      if (sourceNode?.type === 'trigger' && targetNode?.type === 'email') {
+        return false;
+      }
+      return true;
+    },
+    [nodes]
   );
 
   const onDragOver = useCallback((event: React.DragEvent) => {
@@ -525,9 +1079,37 @@ const WorkflowEditor: React.FC = () => {
         y: event.clientY,
       });
 
-      const nodeConfig = type === 'trigger' 
-        ? { type: 'button_trigger' }
-        : (type === 'schedule' ? { type: 'interval_trigger', intervalValue: 1, intervalUnit: 'minutes' } : (type === 'areas' ? { type: 'areas', areasData: null } : { type: actionType, message: 'New Message' }));
+      let nodeConfig: any = {};
+      let label = 'Print Log';
+
+      if (type === 'trigger') {
+        nodeConfig = { type: 'button_trigger' };
+        label = 'Button Trigger';
+      } else if (type === 'schedule') {
+        nodeConfig = { type: 'interval_trigger', intervalValue: 1, intervalUnit: 'minutes' };
+        label = 'Schedule Trigger';
+      } else if (type === 'areas') {
+        nodeConfig = { type: 'areas', areasData: null, areaName: 'Nova Área' };
+        label = 'Areas Node';
+      } else if (type === 'ndvi') {
+        nodeConfig = { type: 'ndvi', ndviMethod: 'sentinel' };
+        label = 'NDVI Node';
+      } else if (type === 'analysis_temporal') {
+        nodeConfig = { type: 'analysis_temporal', periodMonths: 6 };
+        label = 'Análise Temporal';
+      } else if (type === 'analysis_boxplot') {
+        nodeConfig = { type: 'analysis_boxplot', showOutliers: true };
+        label = 'Análise Boxplot';
+      } else if (type === 'analysis_bar') {
+        nodeConfig = { type: 'analysis_bar', barColorTheme: 'emerald' };
+        label = 'Gráfico de Barra';
+      } else if (type === 'email') {
+        nodeConfig = { type: 'email', to: 'produtor@agroflow.com', subject: 'Relatório de Monitoramento NDVI - AgroFlow' };
+        label = 'Email Node';
+      } else {
+        nodeConfig = { type: actionType, message: 'New Message' };
+        label = actionType === 'console_alert' ? 'Console Alert' : 'Print Log';
+      }
 
       const tempId = `temp-${Date.now()}`;
       const newNode: Node = {
@@ -535,10 +1117,11 @@ const WorkflowEditor: React.FC = () => {
         type,
         position,
         data: { 
-          label: type === 'trigger' ? 'Button Trigger' : (type === 'schedule' ? 'Schedule Trigger' : (type === 'areas' ? 'Areas Node' : (actionType === 'console_alert' ? 'Console Alert' : 'Print Log'))),
+          label,
           category: type,
           config: nodeConfig,
-          onExecute: type === 'trigger' ? () => handleExecute(true) : undefined
+          isExecuted: false,
+          onExecute: type === 'trigger' ? () => handleExecuteRef.current?.(true) : undefined
         },
       };
 
@@ -563,7 +1146,7 @@ const WorkflowEditor: React.FC = () => {
         toast.error('Failed to add node');
       }
     },
-    [reactFlowInstance, id, setNodes, handleExecute]
+    [reactFlowInstance, id, setNodes]
   );
 
   const onNodeClick = useCallback((_: any, node: Node) => {
@@ -639,7 +1222,8 @@ const WorkflowEditor: React.FC = () => {
         position,
         data: { 
           ...clipboard.data,
-          onExecute: clipboard.data.category === 'trigger' ? handleExecute : undefined
+          isExecuted: false,
+          onExecute: clipboard.data.category === 'trigger' ? () => handleExecuteRef.current?.(true) : undefined
         },
       };
 
@@ -648,7 +1232,7 @@ const WorkflowEditor: React.FC = () => {
     } catch (error) {
       toast.error('Failed to paste node');
     }
-  }, [clipboard, reactFlowInstance, id, handleExecute, setNodes]);
+  }, [clipboard, reactFlowInstance, id, setNodes]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -701,7 +1285,7 @@ const WorkflowEditor: React.FC = () => {
       />
 
       <div className="flex flex-1 overflow-hidden">
-        <div className={isTesting ? 'opacity-50 pointer-events-none grayscale transition-all' : ''}>
+        <div className={`h-full flex flex-col ${isTesting ? 'opacity-50 pointer-events-none grayscale transition-all' : ''}`}>
           <LeftSidebar />
         </div>
 
@@ -751,6 +1335,7 @@ const WorkflowEditor: React.FC = () => {
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            isValidConnection={isValidConnection}
             onInit={setReactFlowInstance}
             onDrop={onDrop}
             onDragOver={onDragOver}
@@ -789,9 +1374,9 @@ const WorkflowEditor: React.FC = () => {
           </ReactFlow>
         </div>
 
-        <div className={isTesting ? 'opacity-50 pointer-events-none' : ''}>
+        <div className={`h-full flex flex-col ${isTesting ? 'opacity-50 pointer-events-none' : ''}`}>
           <NodeConfigPanel 
-            selectedNode={selectedNode}
+            selectedNode={nodes.find(n => n.id === selectedNode?.id) || selectedNode}
             onSave={handleSaveNodeConfig}
             onDelete={handleDeleteNode}
             onClose={() => setSelectedNode(null)}

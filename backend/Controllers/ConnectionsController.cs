@@ -29,6 +29,19 @@ public class ConnectionsController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<Connection>> CreateConnection([FromBody] Connection connection)
     {
+        var sourceNode = await _context.Nodes.FindAsync(connection.SourceNodeId);
+        var targetNode = await _context.Nodes.FindAsync(connection.TargetNodeId);
+        
+        if (sourceNode == null || targetNode == null)
+        {
+            return BadRequest("Nó de origem ou de destino não encontrado.");
+        }
+        
+        if (sourceNode.Category == "trigger" && targetNode.Category == "email")
+        {
+            return BadRequest("Não é permitido conectar um nó de Gatilho de Botão diretamente a um nó de E-mail.");
+        }
+
         _context.Connections.Add(connection);
         await _context.SaveChangesAsync();
         return CreatedAtAction(nameof(GetConnection), new { id = connection.Id }, connection);
